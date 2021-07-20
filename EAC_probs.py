@@ -7,11 +7,11 @@ from data_visulisation import *
 # Configuration #
 #################
 # directories
-ROMS_directory = '/Volumes/LP_MstrData/master-data/ocean/ROMS/Montague_subset/'
+ROMS_directory = '/Volumes/LP_MstrData/master-data/ocean/ROMS/Montague_subset'
 # analysis zone box
 analysisBox = [149, 151, -37.2, -35] # EAC Jet
 # check study zone box position
-check_boxROMS([analysisBox], '/Volumes/LP_MstrData/master-data/ocean/ROMS/Montague_subset/', 
+check_boxROMS([analysisBox], ROMS_directory, 
             depthmax=4000, save=True, out_fn='./plots/ROMS_lowres.png', title='lowres',
             zoom2box=True)
 

@@ -67,6 +67,8 @@ def check_boxROMS(box_ls, ROMS_directory, depthmax=1e10, save=False, out_fn='FIG
     file_ls = [f for f in listdir(ROMS_directory) if isfile(join(ROMS_directory, f))]
     file_ls = list(filter(lambda x:'.nc' in x, file_ls))
     file_ls = sorted(file_ls)
+    # strip all files strating with ._*
+    file_ls = [f for f in file_ls if f[0:2] != '._']
     # obtain bathymetry data
     nc_file = ROMS_directory + '/' + file_ls[0]
     fh = Dataset(nc_file, mode='r')
@@ -128,11 +130,11 @@ def check_boxROMS(box_ls, ROMS_directory, depthmax=1e10, save=False, out_fn='FIG
     if save:
         print('\nSaving plot..')
         fig.savefig(out_fn, dpi=300)
-
-    # show plot
-    print('Close plot to continue..')
-    plt.show()
-    plt.close("all")
+    else:
+        # show plot
+        print('Close plot to continue..')
+        plt.show()
+        plt.close("all")
 
 ##############
 # Map inset #

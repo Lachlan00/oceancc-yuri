@@ -100,9 +100,11 @@ def CC_probs(ROMS_directory, lr_model, region, years=[2012, 2014], depthmax=1e10
     file_ls = [f for f in listdir(ROMS_directory) if isfile(join(ROMS_directory, f))]
     file_ls = list(filter(lambda x:'.nc' in x, file_ls))
     file_ls = sorted(file_ls)
+    # strip all files strating with ._*
+    file_ls = [f for f in file_ls if f[0:2] != '._']
 
     # __get lats and lons__
-    nc_file = ROMS_directory + file_ls[0]
+    nc_file = ROMS_directory + '/' + file_ls[0]
     fh = Dataset(nc_file, mode='r')
     lats = fh.variables['lat_rho'][:] 
     lons = fh.variables['lon_rho'][:]
@@ -180,7 +182,7 @@ def CC_probs(ROMS_directory, lr_model, region, years=[2012, 2014], depthmax=1e10
             df['lon'] = lons[df.eta, df.xi]
             df['lat'] = lats[df.eta, df.xi]
             # arrange  data
-            store[idx] = df[['lon', 'lat', 'dt', 'temp', 'scaler_temp', 'salt', 'scaler_salt','CCprob']]
+            store[idx] = df[['lon', 'lat', 'eta', 'xi', 'dt', 'temp', 'scaler_temp', 'salt', 'scaler_salt','CCprob']]
             idx += 1
         
         # update progress
