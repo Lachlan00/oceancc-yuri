@@ -1,0 +1,7 @@
+**/__pycache__
+**/data
+**/plots
+**/output
+**/.DS_Store
+**/__MACOSX__
+**/.Rhistory
