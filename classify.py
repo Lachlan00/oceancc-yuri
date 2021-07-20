@@ -59,52 +59,49 @@ def current_model(trainData_dir, verbose=True):
 ######################################################################
 # Obtain current classification probability counts from netCDF frame #
 ######################################################################
-def current_prob_count(lr_model, fh, frame_time, frame_idx, eta_rho, xi_rho):
+def current_probs(lr_model, fh, frame_time, frame_idx, eta_rho, xi_rho):
     # get temperature and salinity data in region of interest
     temp = fh.variables['temp'][frame_idx,29,:,:][eta_rho, xi_rho]
     salt = fh.variables['salt'][frame_idx,29,:,:][eta_rho, xi_rho]
     # place in data frame (ravel to 1d array)
     df = pd.DataFrame(data={'temp': temp.ravel(), 'salt': salt.ravel()})
+        # scale data (using scaled data from built model)
+    df['scaler_temp'] = lr_model['scaler_temp'].transform(df[['temp']])
+    df['scaler_salt'] = lr_model['scaler_salt'].transform(df[['salt']])
     # add DoY
     df['DoY'] = int(frame_time.day)
-    # remove missing values
+    df['dt'] = frame_time
+    df['eta'] = eta_rho
+    df['xi'] = xi_rho
+    # replace missing values
+    #df = df.fillna(-9999)
     df = df.dropna()
-    # scale data (using scaled data from built model)
-    df.loc[:,'temp'] = lr_model['scaler_temp'].transform(df[['temp']])
-    df.loc[:,'salt'] = lr_model['scaler_salt'].transform(df[['salt']])
+
     # get probabilities using model
-    probs = lr_model['lr_model'].predict_proba(df[['temp','salt','DoY']])
-    # separate results
-    probA, probB = zip(*probs)
-    # make array of probA (probB is opposite)
-    probA = np.asarray(probA)
-    # count A and B classificatons
-    countA = np.count_nonzero(probA >= 0.5)
-    countB = np.count_nonzero(probA < 0.5)
+    probs = lr_model['lr_model'].predict_proba(df[['scaler_temp','scaler_salt','DoY']])
+    prob_A, prob_B = zip(*probs)
+    df['CCprob'] = prob_A
+    # # sub back in missing values (LINE NIT WORKING YET)
+    # df[['temp','salt','DoY','CCprob']] = [x if x != 0.0 else np.nan for x in prob_EAC]
     
     # return row for data frame
-    return [frame_time, countA, countB]
+    return df
 
 ###############################
-# Compute regional count data #
+# Compute current probability #
 ###############################
-def analyse_region_counts(ROMS_directory, lr_model, region, depthmax=1e10, name_check='NA'):
+def CC_probs(ROMS_directory, lr_model, region, years=[2012, 2014], depthmax=1e10, 
+    out_fn='./output/EACprob.csv'):
     """
     depthmax in meters (arbitarily large by default)
     """
-    if os.path.exists('./data/'+name_check):
-        if yes_or_no('"./data/'+name_check+'" already exists. Would you like to produce a new training dataset?'):
-            print('"./data/'+name_check+'" will be overwirtten.')
-        else:
-            print('Using previously extracted dataset.')
-            return
-    print('\nExtracting current classification count data..')
+    print('\nExtracting current classification probability data..')
     # get ROMS netCDF file list
     file_ls = [f for f in listdir(ROMS_directory) if isfile(join(ROMS_directory, f))]
     file_ls = list(filter(lambda x:'.nc' in x, file_ls))
     file_ls = sorted(file_ls)
 
-    # get lats and lons
+    # __get lats and lons__
     nc_file = ROMS_directory + file_ls[0]
     fh = Dataset(nc_file, mode='r')
     lats = fh.variables['lat_rho'][:] 
@@ -113,7 +110,35 @@ def analyse_region_counts(ROMS_directory, lr_model, region, depthmax=1e10, name_
     ocean_time = fh.variables['ocean_time'][:]
     array_dimensions = lons.shape
 
-    # combine lat and lon to list of tuples
+    # __keep only files with in year range__
+    pbar = ProgressBar(max_value=len(file_ls))
+    # extract count data from each netCDF file
+    drop_idx = []
+    print('Filtering nc files between '+str(years[0])+' and '+str(years[1]))
+    pbar.update(0)
+    for i in range(0, len(file_ls)):
+        # import file
+        nc_file = ROMS_directory + '/' + file_ls[i]
+        fh = Dataset(nc_file, mode='r')
+        # extract time
+        ocean_time = fh.variables['ocean_time'][:]
+        frame_time_start = oceantime_2_dt(ocean_time[0])
+        frame_time_end = oceantime_2_dt(ocean_time[-1])
+        
+        # check if in range
+        if not (((frame_time_start.year >= years[0]) & (frame_time_start.year <= years[1])) |
+               ((frame_time_end.year >= years[0]) & (frame_time_end.year <= years[1]))):
+            drop_idx = drop_idx + [i]
+        
+        pbar.update(i+1)
+        # close file
+        fh.close()
+
+    # drop files not in list
+    for i in sorted(drop_idx, reverse=True):
+        del file_ls[i]
+
+    # __combine lat and lon to list of tuples__
     point_tuple = zip(lats.ravel(), lons.ravel(), bath.ravel())
     # iterate over tuple points and keep every point that is in box
     point_list = []
@@ -134,7 +159,7 @@ def analyse_region_counts(ROMS_directory, lr_model, region, depthmax=1e10, name_
     pbar = ProgressBar(max_value=len(file_ls))
     
     # create data frame to hold count data
-    df_count = pd.DataFrame(np.nan, index=range(0,(len(file_ls)+1)*len(ocean_time)), columns=['dt', 'countA', 'countB'])
+    store = [None]*10000000
     # extract count data from each netCDF file
     idx = 0
     print('Classifying ocean currents in '+str(len(file_ls))+' netCDF files..')
@@ -150,14 +175,24 @@ def analyse_region_counts(ROMS_directory, lr_model, region, depthmax=1e10, name_
             # get dt from ocean_time
             frame_time = oceantime_2_dt(ocean_time[j])
             # get counts and sub into data frame
-            df_count.iloc[idx] = current_prob_count(lr_model, fh, frame_time, j, eta_rho, xi_rho)
+            df = current_probs(lr_model, fh, frame_time, j, eta_rho, xi_rho)
+            # get lon and lat
+            df['lon'] = lons[df.eta, df.xi]
+            df['lat'] = lats[df.eta, df.xi]
+            # arrange  data
+            store[idx] = df[['lon', 'lat', 'dt', 'temp', 'scaler_temp', 'salt', 'scaler_salt','CCprob']]
             idx += 1
-            # update progress
-            pbar.update(i)
-
+        
+        # update progress
+        pbar.update(i+1)
         # close file
         fh.close()
 
-    # drop NaNs and return dataset
-    return(df_count.dropna())
+    # Fix up list of dataframes
+    store = [x for x in store if x is not None]
+    df = pd.concat(store).reset_index(drop=True)
+
+    # save output
+    df.to_csv(out_fn, index=False)
+    print(out_fn)
 
